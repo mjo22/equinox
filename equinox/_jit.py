@@ -14,6 +14,9 @@ import jax._src.traceback_util as traceback_util
 import jax.core
 import jax.errors
 import jax.numpy as jnp
+import jax.sharding as jshard
+import jax.tree_util as jtu
+from jax._src.named_sharding import UNSPECIFIED # default sharding
 from jaxtyping import PyTree
 
 from ._compile_utils import (
@@ -27,7 +30,8 @@ from ._compile_utils import (
 from ._custom_types import sentinel
 from ._deprecate import deprecated_0_10
 from ._doc_utils import doc_remove_args
-from ._filters import combine, is_array, partition
+from ._filters import AxisSpec, combine, is_array, partition
+from ._misc import if_array
 from ._module import field, Module, module_update_wrapper, Partial, Static
 
 
@@ -38,8 +42,32 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 
+ResolvedShardingSpec = None | jshard.Sharding
+ShardingSpec = ResolvedShardingSpec | Callable[[Any], ResolvedShardingSpec]
+
+def _is_none(x: Any) -> bool:
+    return x is None
+
+
+def _resolve_sharding(sharding_spec: ShardingSpec, elem: Any) -> PyTree[ResolvedShardingSpec]:
+    if sharding_spec is None or isinstance(sharding_spec, int):
+        return jtu.tree_map(lambda _: sharding_spec, elem)
+    elif callable(sharding_spec):
+        return jtu.tree_map(sharding_spec, elem)
+    else:
+        raise ValueError(
+            "`in_shardings` and `out_shardings` must consist of None, ints, and callables only."
+        )
+
+
+def _resolve_shardings(
+    pytree: PyTree[Any], shardings_spec: PyTree[ShardingSpec]
+) -> PyTree[ResolvedShardingSpec]:
+    return jtu.tree_map(_resolve_sharding, shardings_spec, pytree, is_leaf=_is_none)
+
+
 @compile_cache
-def _filter_jit_cache(fun_names, jitkwargs):
+def _filter_jit_cache(fun_names, donate_in_shardings, nodonate_in_shardings, out_shardings, jitkwargs):
     def fun_wrapped(dynamic_donate, dynamic_nodonate, static):
         dynamic_dict = dict(**dynamic_donate, **dynamic_nodonate)
         dynamic_fun = dynamic_dict.pop("fun")
@@ -60,7 +88,7 @@ def _filter_jit_cache(fun_names, jitkwargs):
     fun_name, fun_qualname = fun_names
     fun_wrapped.__name__ = fun_name
     fun_wrapped.__qualname__ = fun_qualname
-    return jax.jit(fun_wrapped, donate_argnums=0, static_argnums=2, **jitkwargs)
+    return jax.jit(fun_wrapped, donate_argnums=0, static_argnums=2, in_shardings=(donate_in_shardings, nodonate_in_shardings, UNSPECIFIED), out_shardings=(UNSPECIFIED, out_shardings, UNSPECIFIED), **jitkwargs)
 
 
 def _bind(signature, args, kwargs):
@@ -300,6 +328,8 @@ def filter_jit(
     donate: Literal[
         "all", "all-except-first", "warn", "warn-except-first", "none"
     ] = "none",
+    in_shardings: PyTree[ShardingSpec] = if_array(UNSPECIFIED),
+    out_shardings: PyTree[ShardingSpec] = if_array(UNSPECIFIED),
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
 
 
@@ -310,6 +340,8 @@ def filter_jit(
     donate: Literal[
         "all", "all-except-first", "warn", "warn-except-first", "none"
     ] = "none",
+    in_shardings: PyTree[ShardingSpec] = if_array(UNSPECIFIED),
+    out_shardings: PyTree[ShardingSpec] = if_array(UNSPECIFIED),
 ) -> Callable[_P, _T]: ...
 
 
@@ -320,6 +352,8 @@ def filter_jit(
     donate: Literal[
         "all", "all-except-first", "warn", "warn-except-first", "none"
     ] = "none",
+    in_shardings: PyTree[ShardingSpec]= if_array(UNSPECIFIED),
+    out_shardings: PyTree[ShardingSpec] = if_array(UNSPECIFIED),
     **jitkwargs,
 ):
     """An easier-to-use version of `jax.jit`. All JAX and NumPy arrays are traced, and
@@ -414,10 +448,14 @@ def filter_jit(
             "`filter_jit(..., donate=...)` must be one of 'all', 'all-except-first', "
             "'warn', 'warn-except-first', or 'none'."
         )
+    
+    resolved_in_shardings = _resolve_shardings()
 
     _, name = get_fn_names(fun)
     dynamic_fun, static_fun = hashable_partition(fun, is_array)
-    cached = _filter_jit_cache(fun, jitkwargs)
+    cached = _filter_jit_cache(
+        fun, donate_in_shardings, nodonate_in_shardings, resolved_out_shardings, jitkwargs
+    )
 
     jit_wrapper = _JitWrapper(
         fn=name,

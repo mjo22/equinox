@@ -1,4 +1,3 @@
-import dataclasses
 import functools as ft
 import inspect
 import warnings
@@ -23,6 +22,7 @@ from ._custom_types import sentinel
 from ._deprecate import deprecated_0_10
 from ._doc_utils import doc_remove_args
 from ._filters import combine, filter, is_array, is_array_like, partition
+from ._misc import if_array
 from ._module import Module, module_update_wrapper, Partial, Static
 
 
@@ -52,28 +52,6 @@ def _resolve_axes(
     pytree: PyTree[Any], axes_spec: PyTree[AxisSpec]
 ) -> PyTree[ResolvedAxisSpec]:
     return jtu.tree_map(_resolve_axis, axes_spec, pytree, is_leaf=_is_none)
-
-
-@dataclasses.dataclass(frozen=True)  # not a pytree
-class if_array:
-    """Returns a callable that returns the specified integer if evaluated on an array.
-    Otherwise, it returns `None`.
-
-    !!! Example
-
-        ```python
-        fn = if_array(1)
-        # Evaluate on an array, return the integer.
-        fn(jax.numpy.array([0, 1, 2]))  # 1
-        # Evaluate on not-an-array, return None.
-        fn(True)  # None
-        ```
-    """
-
-    axis: int
-
-    def __call__(self, x: Any) -> int | None:
-        return self.axis if is_array(x) else None
 
 
 def _moveaxis(array, axis):

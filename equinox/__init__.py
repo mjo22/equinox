@@ -33,6 +33,7 @@ from ._filters import (
     partition as partition,
 )
 from ._jit import EquinoxRuntimeError as EquinoxRuntimeError, filter_jit as filter_jit
+from ._misc import if_array as if_array
 from ._make_jaxpr import filter_make_jaxpr as filter_make_jaxpr
 from ._module import (
     AbstractClassVar as AbstractClassVar,
@@ -62,7 +63,6 @@ from ._update import apply_updates as apply_updates
 from ._vmap_pmap import (
     filter_pmap as filter_pmap,
     filter_vmap as filter_vmap,
-    if_array as if_array,
 )
 from .nn import inference_mode as tree_inference  # noqa: F401 - backward compatibility
 

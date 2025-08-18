@@ -7,6 +7,25 @@ from jaxtyping import PyTree
 from ._filters import combine, is_array, partition
 
 
+def filter_device_put(
+    x: PyTree[Any],
+    device_or_shardings: jax.Device | jax.sharding.Sharding,  # pyright: ignore[reportInvalidTypeForm]
+):
+    if isinstance(device_or_shardings, jax.Device):
+        shardings = jax.sharding.SingleDeviceSharding(device_or_shardings)
+    else:
+        shardings = device_or_shardings
+    dynamic, static = partition(x, is_array)
+    dynamic = jax.device_put(dynamic, shardings)
+    return combine(dynamic, static)
+
+
+def filter_device_get(x: PyTree[Any]):
+    dynamic, static = partition(x, is_array)
+    dynamic = jax.device_get(dynamic)
+    return combine(dynamic, static)
+
+
 def filter_shard(
     x: PyTree[Any],
     device_or_shardings: jax.Device | jax.sharding.Sharding,  # pyright: ignore[reportInvalidTypeForm]
